@@ -1,6 +1,16 @@
 # Felshare Device Card (Auto)
 
-A Home Assistant Lovelace **custom card** that auto-detects entities from the **Felshare (Cloud MQTT)** custom integration (`felshare_cloud`) and builds a clean UI **without YAML edits**.
+A Home Assistant Lovelace **custom card** that auto-detects entities and builds a clean UI **without YAML edits**.
+
+✅ Supported integrations:
+- `felshare_cloud` (Cloud MQTT)
+- `felshare_ble` (Bluetooth / BLE)
+
+## What’s new in v6
+
+- BLE devices show as **`BLE • 56:D2`** (short MAC) in the device picker.
+- Header title automatically appends **`(BLE)`** when a BLE device is selected.
+- Entity names are cleaned up (removes leading numeric ids and BLE/MAC prefixes).
 
 ## Install (HACS)
 
@@ -20,12 +30,6 @@ Settings → Dashboards → Resources → Add:
 
 Dashboard → Add card → **Felshare Device Card (Auto)**
 
-## What’s new in v4
-
-- Weekday toggles now show **MON/TUE/WED/THU/FRI/SAT/SUN** above the toggle indicator.
-- Numeric device ids are removed from visible names.
-- Default header picture set to your provided URL.
-
 ## Options (optional)
 
 ```yaml
@@ -38,19 +42,5 @@ show_other_entities: false
 max_other_entities: 12
 platforms:
   - felshare_cloud
-```
-
-You can also use the mini card directly:
-
-```yaml
-type: custom:felshare-days-row
-title: Days
-days:
-  mon: switch.123_work_day_mon
-  tue: switch.123_work_day_tue
-  wed: switch.123_work_day_wed
-  thu: switch.123_work_day_thu
-  fri: switch.123_work_day_fri
-  sat: switch.123_work_day_sat
-  sun: switch.123_work_day_sun
+  - felshare_ble
 ```
