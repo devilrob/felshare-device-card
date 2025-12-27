@@ -1,32 +1,33 @@
 # Felshare Device Card (Auto)
 
-A Home Assistant Lovelace **custom card** that auto-detects Felshare entities and builds a full control UI **without YAML edits**.
+A Home Assistant Lovelace **custom card** that auto-detects entities from the **Felshare (Cloud MQTT)** custom integration (`felshare_cloud`) and builds a full UI **without YAML edits**.
 
 ## Install (HACS)
 
-1. HACS → **⋮** → **Custom repositories**
+1. HACS → ⋮ → **Custom repositories**
 2. Add this repository URL
 3. Type: **Dashboard**
 4. Install
 
-## Add resource
+## Add Resource
 
 Settings → Dashboards → Resources → Add:
 
-- URL: `/hacsfiles/felshare-device-card/felshare-device-card.js`
+- URL: `/hacsfiles/<REPO_NAME>/felshare-device-card.js`
 - Type: `module`
+
+> `<REPO_NAME>` is the GitHub repo name as it appears in HACS (e.g. `felshare-device-card`).
 
 ## Use
 
-Add card → **Felshare Device Card (Auto)**
+Dashboard → Add card → **Felshare Device Card (Auto)**
 
-No entity IDs, no YAML edits.
+No entity ids, no copy/paste YAML.
 
 ## Notes
 
-- The card uses the Entity Registry + Device Registry. It groups entities by `device_id` when available.
-- If no `device_id` is present, it falls back to parsing numeric prefixes like `switch.229070733364532_fan`.
-- You can adjust the detected platforms in YAML config if needed, e.g.:
+- If you have multiple Felshare devices, the card shows a device picker dropdown automatically.
+- The card expects the Entity Registry platform to be `felshare_cloud` (default). If yours differs, you can override:
 
 ```yaml
 type: custom:felshare-device-card
@@ -34,3 +35,8 @@ platforms:
   - felshare_cloud
   - felshare
 ```
+
+- Default header image path:
+  - `/config/www/felshare/diffuser-header.jpg`
+  - Then use `/local/felshare/diffuser-header.jpg` in the card config (default).
+
