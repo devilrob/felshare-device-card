@@ -1,56 +1,160 @@
 /* felshare-device-card.js
- * Felshare Device Card (Auto) - v3
- * - 100% automatic (no entity IDs in YAML)
- * - Uses Entity Registry unique_id patterns from your custom component felshare_cloud
- * - Removes the numeric device id from visible names (friendly-name cleanup)
+ * Felshare Device Card (Auto) - v4
+ * - Day row shows MON/TUE/... labels ABOVE the toggle (custom mini-card)
+ * - Default picture set to requested URL
+ * - Removes numeric device id from friendly names
  *
- * Type: custom:felshare-device-card
+ * Main card type: custom:felshare-device-card
+ * Days row type: custom:felshare-days-row (used internally, but you can use it too)
  */
 
-const CARD_TYPE = "felshare-device-card";
+const MAIN_CARD_TYPE = "felshare-device-card";
+const DAYS_ROW_TYPE = "felshare-days-row";
 
 const DEFAULTS = Object.freeze({
-  // Entity Registry `platform` values to treat as Felshare.
   platforms: ["felshare_cloud"],
-
   title: "Felshare Diffuser",
-
-  // Default picture requested by you (external URL).
   picture: "https://s.alicdn.com/@sc04/kf/H517180dda7c84f708a6cd9ab9475a103u.jpg",
   show_picture: true,
-
-  // If multiple Felshare devices exist, show a dropdown selector inside the card.
   show_device_picker: true,
 
-  // Optional diagnostics section
   show_other_entities: false,
   max_other_entities: 12,
 });
-
-/** Helpers */
-const uidEnds = (entry, suffix) => {
-  const u = (entry?.unique_id || "").toLowerCase();
-  return u.endsWith(`_${String(suffix).toLowerCase()}`);
-};
-
-const entEnds = (entry, suffix) => {
-  const e = (entry?.entity_id || "").toLowerCase();
-  return e.endsWith(`_${String(suffix).toLowerCase()}`);
-};
-
-const first = (list, pred) => list.find(pred) || null;
-const many = (list, pred) => list.filter(pred);
 
 function isDigitsOnly(s) {
   return /^[0-9]+$/.test(String(s || ""));
 }
 
 function stripLeadingDeviceId(name) {
-  // Friendly name example: "229070733364532 HVAC sync airflow"
-  // -> "HVAC sync airflow"
   return String(name || "").replace(/^\s*\d{6,}\s*[-_:]?\s*/g, "");
 }
 
+const uidEnds = (entry, suffix) => (entry?.unique_id || "").toLowerCase().endsWith(`_${String(suffix).toLowerCase()}`);
+const entEnds = (entry, suffix) => (entry?.entity_id || "").toLowerCase().endsWith(`_${String(suffix).toLowerCase()}`);
+const first = (list, pred) => list.find(pred) || null;
+
+/** ---------- Days Row Mini Card ---------- */
+class FelshareDaysRow extends HTMLElement {
+  setConfig(config) {
+    // config: { days: {mon: "switch.x", ...}, labels?: {mon:"MON", ...}, title?: "Days" }
+    this._config = config || {};
+    if (!this.shadowRoot) {
+      this.attachShadow({ mode: "open" });
+      const style = document.createElement("style");
+      style.textContent = `
+        :host { display:block; }
+        ha-card { box-shadow:none !important; border:0 !important; background:transparent !important; }
+        .wrap { padding: 6px 10px 2px 10px; }
+        .title { font-weight: 700; font-size: 14px; margin: 4px 2px 8px 2px; opacity: .9; }
+        .grid {
+          display: grid;
+          grid-template-columns: repeat(7, 1fr);
+          gap: 8px;
+        }
+        .cell {
+          display:flex;
+          flex-direction: column;
+          align-items:center;
+          justify-content:center;
+          padding: 8px 6px 10px 6px;
+          border-radius: 14px;
+          border: 1px solid var(--divider-color);
+          background: var(--card-background-color);
+          cursor: pointer;
+          user-select: none;
+        }
+        .lbl {
+          font-size: 11px;
+          font-weight: 700;
+          letter-spacing: .6px;
+          opacity: .85;
+          margin-bottom: 6px;
+        }
+        .dot {
+          width: 12px;
+          height: 12px;
+          border-radius: 50%;
+          border: 2px solid var(--primary-text-color);
+          opacity: .45;
+        }
+        .cell.on .dot {
+          opacity: 1;
+          border-color: var(--primary-color);
+          background: var(--primary-color);
+        }
+      `;
+      this.shadowRoot.appendChild(style);
+      this._root = document.createElement("div");
+      this.shadowRoot.appendChild(this._root);
+    }
+    this._render();
+  }
+
+  set hass(hass) {
+    this._hass = hass;
+    this._render();
+  }
+
+  getCardSize() {
+    return 1;
+  }
+
+  _state(entityId) {
+    return this._hass?.states?.[entityId]?.state ?? "unknown";
+  }
+
+  _toggle(entityId) {
+    if (!entityId || !this._hass) return;
+    const [domain] = entityId.split(".");
+    this._hass.callService(domain, "toggle", { entity_id: entityId });
+  }
+
+  _render() {
+    if (!this._root || !this._config) return;
+
+    const days = this._config.days || {};
+    const labels = this._config.labels || {
+      mon: "MON", tue: "TUE", wed: "WED", thu: "THU", fri: "FRI", sat: "SAT", sun: "SUN",
+    };
+
+    const order = ["mon","tue","wed","thu","fri","sat","sun"];
+    const cells = order.map((k) => {
+      const ent = days[k];
+      if (!ent) return `<div></div>`;
+      const on = this._state(ent) === "on";
+      const cls = on ? "cell on" : "cell";
+      const lbl = labels[k] || k.toUpperCase();
+      // data-entity used for click
+      return `
+        <div class="${cls}" data-entity="${ent}">
+          <div class="lbl">${lbl}</div>
+          <div class="dot" aria-hidden="true"></div>
+        </div>
+      `;
+    }).join("");
+
+    const title = this._config.title ? `<div class="title">${this._config.title}</div>` : "";
+
+    this._root.innerHTML = `
+      <ha-card>
+        <div class="wrap">
+          ${title}
+          <div class="grid">${cells}</div>
+        </div>
+      </ha-card>
+    `;
+
+    // Wire clicks
+    this._root.querySelectorAll(".cell").forEach((el) => {
+      el.addEventListener("click", () => this._toggle(el.getAttribute("data-entity")));
+    });
+  }
+}
+
+customElements.define(DAYS_ROW_TYPE, FelshareDaysRow);
+
+/** ---------- Main Auto Card ---------- */
 class FelshareDeviceCard extends HTMLElement {
   static getStubConfig() {
     return { ...DEFAULTS };
@@ -62,9 +166,10 @@ class FelshareDeviceCard extends HTMLElement {
     this._helpers = null;
     this._loading = null;
 
-    this._entriesByKey = new Map();    // key -> [{entity_id, unique_id, device_id, platform, original_name}]
-    this._labelByKey = new Map();      // key -> pretty label
+    this._entriesByKey = new Map();
+    this._labelByKey = new Map();
     this._keys = [];
+    this._lastModel = null;
 
     if (!this.shadowRoot) {
       this.attachShadow({ mode: "open" });
@@ -92,33 +197,13 @@ class FelshareDeviceCard extends HTMLElement {
       :host { display:block; }
       ha-card { overflow:hidden; }
 
-      .picture {
-        width: 100%;
-        height: 160px;
-        object-fit: cover;
-        display: block;
-      }
-      .header {
-        display:flex;
-        gap: 12px;
-        align-items:center;
-        padding: 14px 16px 10px 16px;
-      }
-      .title {
-        font-size: 16px;
-        font-weight: 700;
-        line-height: 1.2;
-      }
-      .sub {
-        font-size: 12px;
-        opacity: 0.75;
-        margin-top: 2px;
-      }
+      .picture { width: 100%; height: 160px; object-fit: cover; display: block; }
+      .header { display:flex; gap: 12px; align-items:center; padding: 14px 16px 10px 16px; }
+      .title { font-size: 16px; font-weight: 700; line-height: 1.2; }
+      .sub { font-size: 12px; opacity: 0.75; margin-top: 2px; }
       .picker { margin-left:auto; }
       select {
-        font: inherit;
-        padding: 6px 8px;
-        border-radius: 10px;
+        font: inherit; padding: 6px 8px; border-radius: 10px;
         border: 1px solid var(--divider-color);
         background: var(--card-background-color);
         color: var(--primary-text-color);
@@ -137,10 +222,7 @@ class FelshareDeviceCard extends HTMLElement {
         padding-right: 6px !important;
       }
 
-      .note {
-        padding: 14px 16px 18px 16px;
-        opacity: 0.8;
-      }
+      .note { padding: 14px 16px 18px 16px; opacity: 0.8; }
     `;
     return s;
   }
@@ -160,20 +242,12 @@ class FelshareDeviceCard extends HTMLElement {
   }
 
   _deviceIdFromEntityId(entityId) {
-    // Example: switch.229070733364532_fan -> 229070733364532
     const m = String(entityId || "").match(/^[^.]+\.(\d{6,})_/);
     return m ? m[1] : null;
   }
 
-  _friendlyName(entityId, fallback) {
-    const st = this._hass?.states?.[entityId];
-    const fn = st?.attributes?.friendly_name;
-    return stripLeadingDeviceId(fn || fallback || entityId);
-  }
-
   _state(entityId) {
-    const st = this._hass?.states?.[entityId];
-    return st?.state ?? "";
+    return this._hass?.states?.[entityId]?.state ?? "";
   }
 
   async _ensureData() {
@@ -197,7 +271,6 @@ class FelshareDeviceCard extends HTMLElement {
       const byKey = new Map();
       const labelByKey = new Map();
 
-      // Prefer HA device_id as grouping key; fallback to numeric device id from entity_id
       for (const e of felshare) {
         const key = e.device_id || this._deviceIdFromEntityId(e.entity_id) || "__unknown__";
         if (!byKey.has(key)) byKey.set(key, []);
@@ -211,16 +284,13 @@ class FelshareDeviceCard extends HTMLElement {
 
         if (!labelByKey.has(key)) {
           let label = null;
-          if (e.device_id) {
-            label = deviceNameById.get(e.device_id);
-          } else {
-            label = this._deviceIdFromEntityId(e.entity_id);
-          }
+          if (e.device_id) label = deviceNameById.get(e.device_id);
+          else label = this._deviceIdFromEntityId(e.entity_id);
           labelByKey.set(key, label || "Felshare Diffuser");
         }
       }
 
-      // Fallback: scan hass.states for numeric-prefix entities
+      // Fallback if registry filter yields nothing
       if (byKey.size === 0) {
         const pattern = /^(switch|number|select|sensor|text|button|time)\.\d{6,}_/;
         const ids = Object.keys(this._hass.states || {}).filter((id) => pattern.test(id));
@@ -232,18 +302,13 @@ class FelshareDeviceCard extends HTMLElement {
         }
       }
 
-      // Sort for stable UI
-      for (const [k, list] of byKey.entries()) {
-        list.sort((a, b) => a.entity_id.localeCompare(b.entity_id));
-      }
+      for (const [k, list] of byKey.entries()) list.sort((a, b) => a.entity_id.localeCompare(b.entity_id));
 
-      // Build pretty labels: if the device name is only digits, show "Diffuser • 4532"
       const prettyLabel = (key) => {
-        const raw = labelByKey.get(key) || key;
-        const asStr = String(raw || "");
-        if (isDigitsOnly(asStr)) return `Diffuser • ${asStr.slice(-4)}`;
+        const raw = String(labelByKey.get(key) || key || "");
+        if (isDigitsOnly(raw)) return `Diffuser • ${raw.slice(-4)}`;
         if (isDigitsOnly(String(key))) return `Diffuser • ${String(key).slice(-4)}`;
-        return stripLeadingDeviceId(asStr) || "Felshare Diffuser";
+        return stripLeadingDeviceId(raw) || "Felshare Diffuser";
       };
 
       this._entriesByKey = byKey;
@@ -258,10 +323,8 @@ class FelshareDeviceCard extends HTMLElement {
   }
 
   _matchModel(entries) {
-    // Match using unique_id suffixes from felshare_cloud integration
     const model = {};
 
-    // Switches
     model.power = first(entries, (x) => uidEnds(x, "power") || entEnds(x, "power"))?.entity_id || null;
     model.fan = first(entries, (x) => uidEnds(x, "fan") || entEnds(x, "fan"))?.entity_id || null;
 
@@ -284,15 +347,12 @@ class FelshareDeviceCard extends HTMLElement {
 
     model.hvac_sync_enabled = first(entries, (x) => uidEnds(x, "hvac_sync_enabled") || entEnds(x, "89_hvac_sync") || entEnds(x, "hvac_sync_enabled"))?.entity_id || null;
 
-    // Selects
     model.hvac_thermostat = first(entries, (x) => uidEnds(x, "hvac_sync_thermostat") || entEnds(x, "90_hvac_sync_thermostat") || entEnds(x, "hvac_sync_thermostat"))?.entity_id || null;
     model.hvac_airflow = first(entries, (x) => uidEnds(x, "hvac_sync_airflow_mode") || entEnds(x, "88_hvac_sync_airflow") || entEnds(x, "hvac_sync_airflow_mode"))?.entity_id || null;
 
-    // Time
     model.hvac_start = first(entries, (x) => uidEnds(x, "hvac_sync_start") || entEnds(x, "91_hvac_sync_start") || entEnds(x, "hvac_sync_start"))?.entity_id || null;
     model.hvac_end = first(entries, (x) => uidEnds(x, "hvac_sync_end") || entEnds(x, "92_hvac_sync_end") || entEnds(x, "hvac_sync_end"))?.entity_id || null;
 
-    // Numbers
     model.consumption = first(entries, (x) => uidEnds(x, "consumption") || entEnds(x, "consumption"))?.entity_id || null;
     model.capacity = first(entries, (x) => uidEnds(x, "capacity") || entEnds(x, "capacity"))?.entity_id || null;
     model.remain_oil = first(entries, (x) => uidEnds(x, "remain_oil") || entEnds(x, "remain_oil"))?.entity_id || null;
@@ -303,20 +363,16 @@ class FelshareDeviceCard extends HTMLElement {
     model.hvac_on_delay_s = first(entries, (x) => uidEnds(x, "hvac_sync_on_delay_s") || entEnds(x, "94_hvac_sync_on_delay_s") || entEnds(x, "hvac_sync_on_delay_s"))?.entity_id || null;
     model.hvac_off_delay_s = first(entries, (x) => uidEnds(x, "hvac_sync_off_delay_s") || entEnds(x, "95_hvac_sync_off_delay_s") || entEnds(x, "hvac_sync_off_delay_s"))?.entity_id || null;
 
-    // Text
     model.oil_name = first(entries, (x) => uidEnds(x, "oil_name") || entEnds(x, "oil_name"))?.entity_id || null;
     model.work_start = first(entries, (x) => uidEnds(x, "work_start") || entEnds(x, "01_work_start") || entEnds(x, "work_start"))?.entity_id || null;
     model.work_end = first(entries, (x) => uidEnds(x, "work_end") || entEnds(x, "02_work_end") || entEnds(x, "work_end"))?.entity_id || null;
 
-    // Sensors
     model.mqtt_status = first(entries, (x) => uidEnds(x, "mqtt_status") || entEnds(x, "mqtt_status"))?.entity_id || null;
     model.liquid_level = first(entries, (x) => uidEnds(x, "liquid_level") || entEnds(x, "liquid_level"))?.entity_id || null;
     model.work_schedule = first(entries, (x) => uidEnds(x, "work_schedule") || entEnds(x, "work_schedule"))?.entity_id || null;
 
-    // Button
     model.refresh = first(entries, (x) => uidEnds(x, "refresh") || /_refresh$/i.test(x.entity_id))?.entity_id || null;
 
-    // Track used entities
     const used = new Set(
       Object.values(model.work_days || {})
         .concat([
@@ -335,12 +391,10 @@ class FelshareDeviceCard extends HTMLElement {
   }
 
   _buildHeaderSubtitle(model) {
-    // Show a clean subtitle without numeric device id
     const parts = [];
     if (model?.mqtt_status) parts.push(`MQTT: ${this._state(model.mqtt_status)}`);
     if (model?.liquid_level) parts.push(`Level: ${this._state(model.liquid_level)}%`);
-    if (parts.length) return parts.join(" · ");
-    return "Ready";
+    return parts.length ? parts.join(" · ") : "Ready";
   }
 
   _entitiesCard(title, rows) {
@@ -367,6 +421,7 @@ class FelshareDeviceCard extends HTMLElement {
     if (!entries.length) return null;
 
     const model = this._matchModel(entries);
+    this._lastModel = model;
 
     const quick = [
       this._buttonCard(model.power, "Power", "mdi:power"),
@@ -384,10 +439,7 @@ class FelshareDeviceCard extends HTMLElement {
     ].filter(Boolean);
 
     const cards = [];
-
-    if (quick.length) {
-      cards.push({ type: "grid", columns: 5, square: false, cards: quick });
-    }
+    if (quick.length) cards.push({ type: "grid", columns: 5, square: false, cards: quick });
 
     const status = this._entitiesCard("Status", [
       model.mqtt_status && { entity: model.mqtt_status, name: "MQTT status", icon: "mdi:cloud-check" },
@@ -416,16 +468,15 @@ class FelshareDeviceCard extends HTMLElement {
     ]);
     if (schedule) cards.push(schedule);
 
-    const dayTiles = [
-      model.work_days?.mon && { type: "tile", entity: model.work_days.mon, name: "M", hide_state: true },
-      model.work_days?.tue && { type: "tile", entity: model.work_days.tue, name: "T", hide_state: true },
-      model.work_days?.wed && { type: "tile", entity: model.work_days.wed, name: "W", hide_state: true },
-      model.work_days?.thu && { type: "tile", entity: model.work_days.thu, name: "T", hide_state: true },
-      model.work_days?.fri && { type: "tile", entity: model.work_days.fri, name: "F", hide_state: true },
-      model.work_days?.sat && { type: "tile", entity: model.work_days.sat, name: "S", hide_state: true },
-      model.work_days?.sun && { type: "tile", entity: model.work_days.sun, name: "S", hide_state: true },
-    ].filter(Boolean);
-    if (dayTiles.length) cards.push({ type: "grid", columns: 7, square: false, cards: dayTiles });
+    const anyDay = Object.values(model.work_days || {}).some(Boolean);
+    if (anyDay) {
+      cards.push({
+        type: `custom:${DAYS_ROW_TYPE}`,
+        title: "Days",
+        days: model.work_days,
+        labels: { mon:"MON", tue:"TUE", wed:"WED", thu:"THU", fri:"FRI", sat:"SAT", sun:"SUN" },
+      });
+    }
 
     const hvac = this._entitiesCard("HVAC Sync", [
       model.hvac_thermostat && { entity: model.hvac_thermostat, name: "Thermostat", icon: "mdi:thermostat" },
@@ -438,30 +489,20 @@ class FelshareDeviceCard extends HTMLElement {
     if (hvac) cards.push(hvac);
 
     if (this._config.show_other_entities && model._other_entries?.length) {
-      const rows = model._other_entries.slice(0, this._config.max_other_entities || DEFAULTS.max_other_entities).map((e) => ({
-        entity: e.entity_id,
-        name: this._friendlyName(e.entity_id, e.original_name),
-      }));
-      cards.push({
-        type: "entities",
-        title: "Other entities",
-        show_header_toggle: false,
-        entities: rows,
-      });
+      const rows = model._other_entries
+        .slice(0, this._config.max_other_entities || DEFAULTS.max_other_entities)
+        .map((e) => ({ entity: e.entity_id, name: stripLeadingDeviceId(this._hass?.states?.[e.entity_id]?.attributes?.friendly_name || e.original_name || e.entity_id) }));
+      cards.push({ type: "entities", title: "Other entities", show_header_toggle: false, entities: rows });
     }
 
     const stackConfig = { type: "vertical-stack", cards };
     const el = await helpers.createCardElement(stackConfig);
     el.hass = this._hass;
-
-    // Save for header subtitle
-    this._lastModel = model;
     return el;
   }
 
   async _render() {
     if (!this._root || !this._config) return;
-
     if (this._hass) await this._ensureData();
 
     const keys = this._keys || [];
@@ -478,12 +519,11 @@ class FelshareDeviceCard extends HTMLElement {
         ? `
           <div class="picker">
             <select id="devpicker">
-              ${keys
-                .map((k) => {
-                  const sel = k === key ? "selected" : "";
-                  return `<option value="${this._escape(k)}" ${sel}>${this._escape(this._labelByKey.get(k) || k)}</option>`;
-                })
-                .join("")}
+              ${keys.map((k) => {
+                const sel = k === key ? "selected" : "";
+                const lbl = this._labelByKey.get(k) || k;
+                return `<option value="${this._escape(k)}" ${sel}>${this._escape(lbl)}</option>`;
+              }).join("")}
             </select>
           </div>
         `
@@ -502,11 +542,7 @@ class FelshareDeviceCard extends HTMLElement {
           ${pickerHtml}
         </div>
         <div class="content" id="content"></div>
-        ${
-          !hasDevices
-            ? `<div class="note">No encontré entidades de Felshare. Verifica que la integración esté cargada y que el platform sea: ${(this._config.platforms || DEFAULTS.platforms).join(", ")}.</div>`
-            : ""
-        }
+        ${!hasDevices ? `<div class="note">No encontré entidades de Felshare. Verifica que la integración esté cargada y que el platform sea: ${(this._config.platforms || DEFAULTS.platforms).join(", ")}.</div>` : ""}
       </ha-card>
     `;
 
@@ -527,7 +563,7 @@ class FelshareDeviceCard extends HTMLElement {
     if (!this._childCard || this._childKey !== key) {
       this._childKey = key;
       this._childCard = await this._buildChildCard(key);
-      // Re-render header subtitle after model is known
+      // Re-render once to update subtitle after model is known
       await this._render();
       return;
     }
@@ -542,13 +578,13 @@ class FelshareDeviceCard extends HTMLElement {
   }
 }
 
-customElements.define(CARD_TYPE, FelshareDeviceCard);
+customElements.define(MAIN_CARD_TYPE, FelshareDeviceCard);
 
 window.customCards = window.customCards || [];
 window.customCards.push({
-  type: CARD_TYPE,
+  type: MAIN_CARD_TYPE,
   name: "Felshare Device Card (Auto)",
   description: "Auto-detect Felshare devices/entities and build a full control UI without YAML edits.",
 });
 
-console.info("%cFELSHARE-DEVICE-CARD%c v3 Loaded", "color: white; background: #03a9f4; font-weight: 700;", "color: #03a9f4;");
+console.info("%cFELSHARE-DEVICE-CARD%c v4 Loaded", "color: white; background: #03a9f4; font-weight: 700;", "color: #03a9f4;");

@@ -20,6 +20,12 @@ Settings → Dashboards → Resources → Add:
 
 Dashboard → Add card → **Felshare Device Card (Auto)**
 
+## What’s new in v4
+
+- Weekday toggles now show **MON/TUE/WED/THU/FRI/SAT/SUN** above the toggle indicator.
+- Numeric device ids are removed from visible names.
+- Default header picture set to your provided URL.
+
 ## Options (optional)
 
 ```yaml
@@ -34,8 +40,17 @@ platforms:
   - felshare_cloud
 ```
 
-### Notes
+You can also use the mini card directly:
 
-- This card matches entities using **Entity Registry `unique_id` patterns** (robust even if entity_ids differ).
-- The card strips the numeric device id from friendly names automatically.
-- Default picture is an external URL (you can change it to a local `/local/...` image if you prefer).
+```yaml
+type: custom:felshare-days-row
+title: Days
+days:
+  mon: switch.123_work_day_mon
+  tue: switch.123_work_day_tue
+  wed: switch.123_work_day_wed
+  thu: switch.123_work_day_thu
+  fri: switch.123_work_day_fri
+  sat: switch.123_work_day_sat
+  sun: switch.123_work_day_sun
+```
