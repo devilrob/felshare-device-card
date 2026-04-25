@@ -221,6 +221,7 @@ class FelshareDeviceCard extends HTMLElement {
     this._rendering = false;
     this._renderPending = false;
     this._dataLoaded = false;
+    this._debounceTimer = null;
 
     if (!this.shadowRoot) {
       this.attachShadow({ mode: "open" });
@@ -235,9 +236,13 @@ class FelshareDeviceCard extends HTMLElement {
   set hass(hass) {
     this._hass = hass;
     if (this._childCard) this._childCard.hass = hass;
-    this._ensureData()
-      .then(() => this._render())
-      .catch((e) => console.error("[felshare-device-card] Unhandled error in hass update:", e));
+    if (this._debounceTimer) clearTimeout(this._debounceTimer);
+    this._debounceTimer = setTimeout(() => {
+      this._debounceTimer = null;
+      this._ensureData()
+        .then(() => this._render())
+        .catch((e) => console.error("[felshare-device-card] Unhandled error in hass update:", e));
+    }, 50);
   }
 
   getCardSize() {
@@ -287,16 +292,37 @@ class FelshareDeviceCard extends HTMLElement {
     return this._hass?.states?.[entityId]?.state ?? "";
   }
 
+  async _fetchEntityRegistry() {
+    // Prefer the lighter display endpoint (HA ≥ 2022.9).
+    // HA ≥ 2023.x returns compressed field names inside { entities: [...] }.
+    // Fall back to the full list on older HA or on any error.
+    try {
+      const res = await this._hass.callWS({ type: "config/entity_registry/list_for_display" });
+      const raw = res?.entities ?? res ?? [];
+      return raw.map((e) => ({
+        entity_id:    e.entity_id    ?? e.ei,
+        unique_id:    e.unique_id    ?? e.ui,
+        platform:     e.platform     ?? e.pl,
+        device_id:    e.device_id    ?? e.di,
+        original_name: e.original_name ?? e.on,
+        name:         e.name         ?? e.na,
+      }));
+    } catch (_) {
+      return this._hass.callWS({ type: "config/entity_registry/list" });
+    }
+  }
+
   async _ensureData() {
     if (!this._hass) return;
     if (this._loading) return this._loading;
 
     this._loading = (async () => {
       try {
-      const [entityReg, deviceReg] = await Promise.all([
-        this._hass.callWS({ type: "config/entity_registry/list" }),
+      const [rawEntityReg, deviceReg] = await Promise.all([
+        this._fetchEntityRegistry(),
         this._hass.callWS({ type: "config/device_registry/list" }),
       ]);
+      const entityReg = rawEntityReg;
 
       const deviceNameById = new Map();
       for (const d of deviceReg || []) {
