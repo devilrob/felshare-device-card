@@ -1,5 +1,5 @@
 /* felshare-device-card.js
- * Felshare Device Card (Auto) - v6
+ * Felshare Device Card (Auto) - v7
  *
  * Supports:
  * - felshare_cloud (Cloud MQTT)
@@ -753,4 +753,4 @@ window.customCards.push({
   description: "Auto-detect Felshare Cloud/BLE devices and build a full control UI without YAML edits.",
 });
 
-console.info("%cFELSHARE-DEVICE-CARD%c v6 Loaded", "color: white; background: #03a9f4; font-weight: 700;", "color: #03a9f4;");
+console.info("%cFELSHARE-DEVICE-CARD%c v7 Loaded", "color: white; background: #03a9f4; font-weight: 700;", "color: #03a9f4;");
