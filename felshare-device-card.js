@@ -70,9 +70,16 @@ function prettyEntityName(raw) {
   return s.trim();
 }
 
-// unique_id forms:
-// - Cloud: "<deviceid>_power" (underscore)
-// - BLE:   "<mac>-power_on" (dash)
+function escapeHtml(s) {
+  return String(s ?? "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
+}
+
+// unique_id forms: Cloud "<deviceid>_power" (underscore), BLE "<mac>-power_on" (dash)
 const uidEnds = (entry, suffix) => {
   const u = String(entry?.unique_id || "").toLowerCase();
   const s = String(suffix || "").toLowerCase();
@@ -165,16 +172,16 @@ class FelshareDaysRow extends HTMLElement {
       if (!ent) return `<div></div>`;
       const on = this._state(ent) === "on";
       const cls = on ? "cell on" : "cell";
-      const lbl = labels[k] || k.toUpperCase();
+      const lbl = escapeHtml(labels[k] || k.toUpperCase());
       return `
-        <div class="${cls}" data-entity="${ent}">
+        <div class="${cls}" data-entity="${escapeHtml(ent)}">
           <div class="lbl">${lbl}</div>
           <div class="dot" aria-hidden="true"></div>
         </div>
       `;
     }).join("");
 
-    const title = this._config.title ? `<div class="title">${this._config.title}</div>` : "";
+    const title = this._config.title ? `<div class="title">${escapeHtml(this._config.title)}</div>` : "";
 
     this._root.innerHTML = `
       <ha-card>
@@ -211,6 +218,9 @@ class FelshareDeviceCard extends HTMLElement {
     this._macByKey = new Map();
     this._keys = [];
     this._lastModel = null;
+    this._rendering = false;
+    this._renderPending = false;
+    this._dataLoaded = false;
 
     if (!this.shadowRoot) {
       this.attachShadow({ mode: "open" });
@@ -225,7 +235,9 @@ class FelshareDeviceCard extends HTMLElement {
   set hass(hass) {
     this._hass = hass;
     if (this._childCard) this._childCard.hass = hass;
-    this._ensureData().then(() => this._render());
+    this._ensureData()
+      .then(() => this._render())
+      .catch((e) => console.error("[felshare-device-card] Unhandled error in hass update:", e));
   }
 
   getCardSize() {
@@ -263,12 +275,7 @@ class FelshareDeviceCard extends HTMLElement {
   }
 
   _escape(s) {
-    return String(s ?? "")
-      .replaceAll("&", "&amp;")
-      .replaceAll("<", "&lt;")
-      .replaceAll(">", "&gt;")
-      .replaceAll('"', "&quot;")
-      .replaceAll("'", "&#39;");
+    return escapeHtml(s);
   }
 
   _deviceIdFromEntityId(entityId) {
@@ -285,6 +292,7 @@ class FelshareDeviceCard extends HTMLElement {
     if (this._loading) return this._loading;
 
     this._loading = (async () => {
+      try {
       const [entityReg, deviceReg] = await Promise.all([
         this._hass.callWS({ type: "config/entity_registry/list" }),
         this._hass.callWS({ type: "config/device_registry/list" }),
@@ -377,6 +385,12 @@ class FelshareDeviceCard extends HTMLElement {
       if (this._keys.length === 0 && byKey.has("__unknown__")) this._keys = ["__unknown__"];
 
       if (!this._selectedKey) this._selectedKey = this._keys[0] || null;
+      this._dataLoaded = true;
+      } catch (err) {
+        console.error("[felshare-device-card] Failed to load entity/device registry:", err);
+        this._loading = null; // allow retry on next hass update
+        this._dataLoaded = false;
+      }
     })();
 
     return this._loading;
@@ -421,10 +435,6 @@ class FelshareDeviceCard extends HTMLElement {
     model.remain_oil = first(entries, (x) => uidEnds(x, "remain_oil") || uidEnds(x, "oil_remain_ml") || entEnds(x, "remain_oil"))?.entity_id || null;
     model.work_run_s = first(entries, (x) => uidEnds(x, "work_run_s") || entEnds(x, "03_work_run_s") || entEnds(x, "work_run_s"))?.entity_id || null;
     model.work_stop_s = first(entries, (x) => uidEnds(x, "work_stop_s") || entEnds(x, "04_work_stop_s") || entEnds(x, "work_stop_s"))?.entity_id || null;
-
-    // Cloud delays
-    model.hvac_on_delay_s = model.hvac_on_delay_s;
-    model.hvac_off_delay_s = model.hvac_off_delay_s;
 
     // Text/Time
     model.oil_name = first(entries, (x) => uidEnds(x, "oil_name") || entEnds(x, "oil_name"))?.entity_id || null;
@@ -491,6 +501,7 @@ class FelshareDeviceCard extends HTMLElement {
   }
 
   async _buildChildCard(key) {
+    try {
     const helpers = await this._ensureHelpers();
     const entries = (this._entriesByKey.get(key) || []).slice();
     if (!entries.length) return null;
@@ -506,7 +517,7 @@ class FelshareDeviceCard extends HTMLElement {
       model.refresh
         ? this._buttonCard(
             model.refresh,
-            uidEnds({ unique_id: (entries.find(e => e.entity_id === model.refresh)?.unique_id) }, "request_status") ? "Status" : "Refresh",
+            uidEnds(entries.find((e) => e.entity_id === model.refresh), "request_status") ? "Status" : "Refresh",
             "mdi:refresh",
             { action: "call-service", service: "button.press", target: { entity_id: model.refresh } }
           )
@@ -598,10 +609,24 @@ class FelshareDeviceCard extends HTMLElement {
     const el = await helpers.createCardElement(stackConfig);
     el.hass = this._hass;
     return el;
+    } catch (err) {
+      console.error("[felshare-device-card] Failed to build child card:", err);
+      return null;
+    }
   }
 
   async _render() {
     if (!this._root || !this._config) return;
+    if (this._rendering) {
+      this._renderPending = true;
+      return;
+    }
+    this._rendering = true;
+    this._renderPending = false;
+    try {
+    if (this._hass && !this._dataLoaded) {
+      this._root.innerHTML = `<ha-card><div class="note">Cargando dispositivos…</div></ha-card>`;
+    }
     if (this._hass) await this._ensureData();
 
     const keys = this._keys || [];
@@ -653,7 +678,7 @@ class FelshareDeviceCard extends HTMLElement {
           ${pickerHtml}
         </div>
         <div class="content" id="content"></div>
-        ${!hasDevices ? `<div class="note">No encontré entidades de Felshare. Verifica que la integración esté cargada y que el platform sea: ${(this._config.platforms || DEFAULTS.platforms).join(", ")}.</div>` : ""}
+        ${!hasDevices ? `<div class="note">No encontré entidades de Felshare. Verifica que la integración esté cargada y que el platform sea: ${this._escape((this._config.platforms || DEFAULTS.platforms).join(", "))}.</div>` : ""}
       </ha-card>
     `;
 
@@ -669,12 +694,13 @@ class FelshareDeviceCard extends HTMLElement {
     }
 
     const content = this._root.querySelector("#content");
-    if (!content || !hasDevices) return;
+    if (!content || !hasDevices) return; // finally still runs
 
     if (!this._childCard || this._childKey !== key) {
       this._childKey = key;
       this._childCard = await this._buildChildCard(key);
-      await this._render(); // update subtitle after model is known
+      // Trigger a second render (outside this lock) to paint the child card and refresh subtitle
+      this._renderPending = true;
       return;
     }
 
@@ -684,6 +710,10 @@ class FelshareDeviceCard extends HTMLElement {
       content.appendChild(this._childCard);
     } else {
       content.innerHTML = `<div class="note">No hay entidades para este dispositivo.</div>`;
+    }
+    } finally {
+      this._rendering = false;
+      if (this._renderPending) this._render().catch((e) => console.error("[felshare-device-card] Render error:", e));
     }
   }
 }
