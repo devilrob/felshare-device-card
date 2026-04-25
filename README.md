@@ -6,7 +6,14 @@ A Home Assistant Lovelace **custom card** that auto-detects entities and builds 
 - `felshare_cloud` (Cloud MQTT)
 - `felshare_ble` (Bluetooth / BLE)
 
-## What’s new in v6
+## What’s new in v7
+
+- **Performance:** `set hass()` is now debounced (50 ms) — eliminates redundant renders on every HA state tick.
+- **API upgrade:** Uses the lighter `config/entity_registry/list_for_display` WebSocket endpoint (HA ≥ 2022.9) with automatic fallback to the classic `list` endpoint on older versions. Handles both HA 2023.x compressed field names and full field names transparently.
+- **Bug fixes:** error recovery in async data loading (card retries on WS failure instead of locking forever), concurrent render race condition guard, XSS prevention in weekday labels/title.
+- **Tests:** 40-test Jest suite added — run with `npm test`.
+
+## What was new in v6
 
 - BLE devices show as **`BLE • 56:D2`** (short MAC) in the device picker.
 - Header title automatically appends **`(BLE)`** when a BLE device is selected.
